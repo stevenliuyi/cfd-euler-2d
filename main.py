@@ -106,6 +106,14 @@ def side(edge, point, xn):
         return 1    # right
 
 # -----------------------------------------------------------------------------
+def plot_mesh():
+    fig = plt.figure()
+    ax  = fig.add_subplot(111, aspect='equal') 
+    for j in range(0, nj):
+        cycle = np.append(jnode[j,:], jnode[j,0]).tolist()
+        ax.plot(xn[cycle, 0], xn[cycle,1], '-o', color='k')
+    plt.show()
+# -----------------------------------------------------------------------------
 # main program
 
 # grid points (structured mesh)
@@ -122,3 +130,4 @@ filename = 'test.dat'
 (xs, ys) = read_mesh(filename)
 
 (xn, itype, jnode, knode, kcell) = transform()
+# plot_mesh()
