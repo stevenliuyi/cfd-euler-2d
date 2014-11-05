@@ -39,7 +39,7 @@ def transform():
             if (i == 0):    itype[k] = 3
             if (i == mx-1): itype[k] = 4
 
-    # generate the cells
+    # generate the cells (3 node points of cells)
     jnode = np.zeros((nj, 3))
     for i in range(0, mx-1):
         for j in range(0, my-1):
@@ -51,7 +51,59 @@ def transform():
             jnode[2*k+1, 1] = mx * (j+1) + (i+1)
             jnode[2*k+1, 2] = mx * (j+1) + i
     
-    return (xn, itype, jnode)
+    # generate edge data
+    # 2 node points of edges
+    klist = []
+    for j in range(0, nj):
+        edge1 = [jnode[j,0], jnode[j,1]]
+        edge2 = [jnode[j,1], jnode[j,0]]
+        edge3 = [jnode[j,0], jnode[j,2]]
+        edge4 = [jnode[j,2], jnode[j,0]]
+        edge5 = [jnode[j,1], jnode[j,2]]
+        edge6 = [jnode[j,2], jnode[j,1]]
+        if not((edge1 in klist) or (edge2 in klist)):
+            klist.append(edge1)
+        if not((edge3 in klist) or (edge4 in klist)):
+            klist.append(edge3)
+        if not((edge5 in klist) or (edge6 in klist)):
+            klist.append(edge5)
+    knode = np.array(klist)
+
+    # identify cells sharing edge k
+    # -1 means no cell is on the side
+    kcell = -np.ones((nk, 2))
+    for j in range(0,nj):
+        edge1 = [jnode[j,0], jnode[j,1]]
+        edge2 = [jnode[j,1], jnode[j,0]]
+        edge3 = [jnode[j,0], jnode[j,2]]
+        edge4 = [jnode[j,2], jnode[j,0]]
+        edge5 = [jnode[j,1], jnode[j,2]]
+        edge6 = [jnode[j,2], jnode[j,1]]
+        if (edge2 in klist): edge1 = edge2
+        if (edge4 in klist): edge3 = edge4
+        if (edge6 in klist): edge5 = edge6
+
+        k1 = klist.index(edge1)
+        k2 = klist.index(edge3)
+        k3 = klist.index(edge5)
+        
+        kcell[k1, side(edge1, jnode[j,2], xn)] = j
+        kcell[k2, side(edge3, jnode[j,1], xn)] = j
+        kcell[k3, side(edge5, jnode[j,0], xn)] = j
+
+    return (xn, itype, jnode, knode, kcell)
+
+# -----------------------------------------------------------------------------
+# determine a cell is on the left or right of a edge
+def side(edge, point, xn):
+    v1 = (xn[edge[1],0] - xn[edge[0],0], \
+          xn[edge[1],1] - xn[edge[0],1])
+    v2 = (xn[point  ,0] - xn[edge[0],0], \
+          xn[point  ,1] - xn[edge[0],1])
+    if (v1[0]*v2[1] - v2[0]*v1[1]) > 0:
+        return 0    # left
+    else:
+        return 1    # right
 
 # -----------------------------------------------------------------------------
 # main program
@@ -63,9 +115,10 @@ mx = 4; my = 4
 # ni - number of points; nj - number of cells; nk - number of edges
 ni = mx * my
 nj = (mx-1) * (my-1) * 2
+nk = (mx-1) * my + (my-1) * mx + (mx-1) * (my-1)
 
 # coordinates of structured mesh
 filename = 'test.dat'
 (xs, ys) = read_mesh(filename)
 
-(xn, itype, jnode) = transform()
+(xn, itype, jnode, knode, kcell) = transform()
