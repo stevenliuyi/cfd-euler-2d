@@ -129,7 +129,6 @@ def transform():
         kcell[k2, side(edge3, jnode[j,1], xn)] = j
         kcell[k3, side(edge5, jnode[j,0], xn)] = j
 
-    # other cell data
     # identify 3 edges forming the cells
     jedge = np.zeros((nj, 3))
     for j in range(0,nj):
@@ -165,7 +164,17 @@ def transform():
         else:
             kcell[gcell[g], 1] = -g-1
 
-    return (xn, itype, jnode, knode, ktype, kcell, jedge, gcell)
+    # identify cells sharing same edges as a cell
+    jcell = np.zeros((nj, 3))
+    for j in range(0, nj):
+        k1 = jedge[j, 0]
+        k2 = jedge[j, 1]
+        k3 = jedge[j, 2]
+        jcell[j,0] = kcell[k1,1] if (kcell[k1,0] == j) else kcell[k1,0]
+        jcell[j,1] = kcell[k2,1] if (kcell[k2,0] == j) else kcell[k2,0]
+        jcell[j,2] = kcell[k3,1] if (kcell[k3,0] == j) else kcell[k3,0]
+
+    return (xn, itype, jnode, knode, ktype, kcell, jedge, gcell, jcell)
 
 # -----------------------------------------------------------------------------
 # determine a cell is on the left or right of a edge
@@ -219,7 +228,7 @@ def ic():
     if (ibcin == 2):
         q_ghost[0,:] = 1.
         q_ghost[1,:] = 1.5
-        # q_ghost[1,:] = 1.
+        q_ghost[1,:] = 1.
         q_ghost[2,:] = 0.
         q_ghost[3,:] = 2.
     return q, q_ghost
@@ -293,6 +302,94 @@ def flux():
     return flux_phys
 
 # -----------------------------------------------------------------------------
+# evulation of the dissipation vectors
+def dissp():
+    # initialize dissipation
+    flux_av = np.zeros((lmax, nj))
+
+    kappa2 = visc/4.
+    kappa4 = visc/256.
+
+    # compute flow conditions at cell-centers
+    pr = np.zeros(nj)
+    # interior cells
+    for j in range(0, nj):
+        rho = q[0,j]
+        u   = q[1,j] / q[0,j]
+        v   = q[2,j] / q[0,j]
+        et  = q[3,j]
+        pr[j] = pressure(rho, u, v, et)
+    # ghost cells
+    pr_ghost = np.zeros(ng)
+    for g in range(0, ng):
+        rho = q_ghost[0,g]
+        u   = q_ghost[1,g] / q_ghost[0,g]
+        v   = q_ghost[2,g] / q_ghost[0,g]
+        et  = q_ghost[3,g]
+        pr_ghost[g] = pressure(rho, u, v, et)
+
+    # compute undivided pseudo-Laplacians at cell-centers
+    dp = np.zeros(nj)
+    dq = np.zeros((lmax, nj))
+    for j in range(0, nj):
+        # define cells sharing same edge as cell j
+        j1 = jcell[j, 0]
+        j2 = jcell[j, 1]
+        j3 = jcell[j, 2]
+        # compute undivided pseudo-Laplaican of pressure
+        p1 = pr[j1] if (j1 >= 0) else pr_ghost[-j1-1]
+        p2 = pr[j2] if (j2 >= 0) else pr_ghost[-j2-1]
+        p3 = pr[j3] if (j3 >= 0) else pr_ghost[-j3-1]
+
+        dpnum = (p1-pr[j])   + (p2-pr[j])   + (p3-pr[j])
+        dpden = (p1+pr[j])/2 + (p2+pr[j])/2 + (p3+pr[j])/2
+        dp[j] = dpnum / dpden
+
+        # compute undivided pseudo-Laplacian of U
+        q1 = q[:,j1] if (j1 >= 0) else q_ghost[:,-j1-1]
+        q2 = q[:,j2] if (j2 >= 0) else q_ghost[:,-j2-1]
+        q3 = q[:,j3] if (j3 >= 0) else q_ghost[:,-j3-1]
+        dq[:,j] = (q1-q[:,j]) + (q2-q[:,j]) + (q3-q[:,j])
+
+    # collect artificial dissiplation flux
+    for k in range(0, nk):
+        # two cells sharing edge k
+        j1 = kcell[k,0]
+        j2 = kcell[k,1]
+        # node points forming edge k
+        i1 = knode[k,0]
+        i2 = knode[k,1]
+        # compute vector length
+        dx1 = xn[i2, 0] - xn[i1, 0]
+        dx2 = xn[i2, 1] - xn[i1, 1]
+        # compute values along edge
+        if (ktype[k] == 0):
+            rho = .5 * (q[0,j1] + q[0,j2])
+            u   = .5 * (q[1,j1] / q[0,j1] + \
+                        q[1,j2] / q[0,j2])
+            v   = .5 * (q[2,j1] / q[0,j1] + \
+                        q[2,j2] / q[0,j2])
+            et  = .5 * (q[3,j1] + q[3,j2])
+
+            p    = pressure(rho, u, v, et)
+            c    = np.sqrt(gamma * p / rho)
+            lam  = abs((u*dx2 - v*dx1) / np.sqrt(dx2**2 + dx1**2)) + c
+            eps2 = kappa2 * (dp[j1] + dp[j2]) / 2
+            eps4 = max(0., kappa4 - eps2)
+            area = 1.!!
+
+            flux1 = (eps2*( q[:,j2] -  q[:,j1]) - \     # incorrect sign in note
+                     eps4*(dq[:,j2] - dq[:,j1])) * lam * area
+        else:
+            # boundary edge
+            flux1 = np.zeros(lmax)
+
+        # collect flux for left and right cells
+        flux_av[:,j1] += flux1
+        flux_av[:,j2] -= flux1
+    return flux_av
+
+# -----------------------------------------------------------------------------
 # main program
 
 # grid points (structured mesh)
@@ -303,6 +400,11 @@ mx = 3; my = 3
 lmax = 4
 gamma = 1.4
 alpha = 1       # axisymmetric flow
+
+cfl  = 1.5
+visc = 5
+eps  = 1e-8
+tmax = 10000
 
 # ni - number of points; nj - number of cells;
 # nk - number of edges;  np - number of ghost cells
@@ -319,10 +421,12 @@ ibcout = 2
 filename = 'test.dat'
 (xs, ys) = read_mesh(filename)
 
-(xn, itype, jnode, knode, ktype, kcell, jedge, gcell) = transform()
+(xn, itype, jnode, knode, ktype, kcell, jedge, gcell, jcell) = transform()
 # plot_mesh()
 
 (q, q_ghost) = ic()
 
 flux_phys = flux()
-print flux_phys
+
+flux_av = dissp()
+print flux_av
