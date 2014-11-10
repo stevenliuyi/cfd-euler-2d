@@ -69,6 +69,44 @@ def transform():
             klist.append(edge5)
     knode = np.array(klist)
 
+    # edge type:
+    # 0 - interior; 1 - solid boundary; 2 - symmetric line
+    # 3 - inflow;   4 - outflow
+    ktype = np.zeros(nk)
+
+    # symmetric line
+    j = 0
+    for i in range(0, mx-1):
+        k = mx * j + i
+        edge1 = [k, k+1]
+        edge2 = [k+1, k]
+        if (edge2 in klist): edge1 = edge2
+        ktype[klist.index(edge1)] = 2
+    # solid boundary
+    j = my-1
+    for i in range(0, mx-1):
+        k = mx * j + i
+        edge1 = [k, k+1]
+        edge2 = [k+1, k]
+        if (edge2 in klist): edge1 = edge2
+        ktype[klist.index(edge1)] = 1
+    # inflow
+    i = 0
+    for j in range(0, my-1):
+        k = mx * j + i
+        edge1 = [k, k+mx]
+        edge2 = [k+mx, k]
+        if (edge2 in klist): edge1 = edge2
+        ktype[klist.index(edge1)] = 3
+    # outflow
+    i = mx-1
+    for j in range(0, my-1):
+        k = mx * j + i
+        edge1 = [k, k+mx]
+        edge2 = [k+mx, k]
+        if (edge2 in klist): edge1 = edge2
+        ktype[klist.index(edge1)] = 4
+
     # identify cells sharing edge k
     # -1 means no cell is on the side
     kcell = -np.ones((nk, 2))
@@ -113,7 +151,14 @@ def transform():
         jedge[j, 1] = k2
         jedge[j, 2] = k3
 
-    return (xn, itype, jnode, knode, kcell, jedge)
+    # ghost cells (defined by the sharing edge with normal cells)
+    gcelllist = []
+    for k in range(0, nk):
+        if (ktype[k] != 0):
+            gcelllist.append(k)
+    gcell = np.array(gcelllist)
+
+    return (xn, itype, jnode, knode, ktype, kcell, jedge, gcell)
 
 # -----------------------------------------------------------------------------
 # determine a cell is on the left or right of a edge
@@ -136,20 +181,63 @@ def plot_mesh():
         ax.plot(xn[cycle, 0], xn[cycle,1], '-o', color='k')
     plt.show()
 # -----------------------------------------------------------------------------
+# initialize conservative variables
+def ic():
+    # defined at cell-centers
+    q = np.ones((lmax, nj))
+    if (ibcin == 1):
+        q[0,:] = 1.
+        q[1,:] = .5
+        q[2,:] = 0.
+        q[3,:] = 1.
+    if (ibcin == 2):
+        q[0,:] = 1.
+        q[1,:] = 1.5
+        q[2,:] = 0.
+        q[3,:] = 2.
+
+    # ghost cells
+    q_ghost = np.ones((lmax, ng))
+    if (ibcin == 1):
+        q_ghost[0,:] = 1.
+        q_ghost[1,:] = .5
+        q_ghost[2,:] = 0.
+        q_ghost[3,:] = 1.
+    if (ibcin == 2):
+        q_ghost[0,:] = 1.
+        q_ghost[1,:] = 1.5
+        q_ghost[2,:] = 0.
+        q_ghost[3,:] = 2.
+    return q, q_ghost
+
+# -----------------------------------------------------------------------------
 # main program
 
 # grid points (structured mesh)
 # mx = 65; my = 17 
 mx = 3; my = 3
 
-# ni - number of points; nj - number of cells; nk - number of edges
+# parameters
+lmax = 4
+gamma = 1.4
+alpha = 1       # axisymmetric flow
+
+# ni - number of points; nj - number of cells;
+# nk - number of edges;  np - number of ghost cells
 ni = mx * my
 nj = (mx-1) * (my-1) * 2
 nk = (mx-1) * my + (my-1) * mx + (mx-1) * (my-1)
+ng = (mx + my - 2) * 2
+
+# boundary conditions
+ibcin  = 2
+ibcout = 2
 
 # coordinates of structured mesh
 filename = 'test.dat'
 (xs, ys) = read_mesh(filename)
 
-(xn, itype, jnode, knode, kcell, jedge) = transform()
+(xn, itype, jnode, knode, ktype, kcell, jedge, gcell) = transform()
 # plot_mesh()
+
+(q, q_ghost) = ic()
