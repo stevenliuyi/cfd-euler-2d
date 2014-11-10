@@ -108,7 +108,7 @@ def transform():
         ktype[klist.index(edge1)] = 4
 
     # identify cells sharing edge k
-    # -1 means no cell is on the side
+    # -1 means no cell (ghost cell) is on the side
     kcell = -np.ones((nk, 2))
     for j in range(0,nj):
         edge1 = [jnode[j,0], jnode[j,1]]
@@ -158,6 +158,13 @@ def transform():
             gcelllist.append(k)
     gcell = np.array(gcelllist)
 
+    # negative number in kcell identify corresponding ghost cell
+    for g in range(0, ng):
+        if kcell[gcell[g], 0] == -1:
+            kcell[gcell[g], 0] = -g-1
+        else:
+            kcell[gcell[g], 1] = -g-1
+
     return (xn, itype, jnode, knode, ktype, kcell, jedge, gcell)
 
 # -----------------------------------------------------------------------------
@@ -173,6 +180,11 @@ def side(edge, point, xn):
         return 1    # right
 
 # -----------------------------------------------------------------------------
+# compute pressure
+def pressure(rho, u, v, et):
+    return (gamma-1) * (et - .5 * rho * (u**2 + v**2))
+
+# -----------------------------------------------------------------------------
 def plot_mesh():
     fig = plt.figure()
     ax  = fig.add_subplot(111, aspect='equal') 
@@ -180,6 +192,7 @@ def plot_mesh():
         cycle = np.append(jnode[j,:], jnode[j,0]).tolist()
         ax.plot(xn[cycle, 0], xn[cycle,1], '-o', color='k')
     plt.show()
+    return
 # -----------------------------------------------------------------------------
 # initialize conservative variables
 def ic():
@@ -206,9 +219,78 @@ def ic():
     if (ibcin == 2):
         q_ghost[0,:] = 1.
         q_ghost[1,:] = 1.5
+        # q_ghost[1,:] = 1.
         q_ghost[2,:] = 0.
         q_ghost[3,:] = 2.
     return q, q_ghost
+
+# -----------------------------------------------------------------------------
+# evulation of flux
+def flux():
+    # initialize flux
+    flux_phys = np.zeros((lmax, nj))
+
+    for k in range(0, nk):
+        # node points forming edge k
+        i1 = knode[k,0]
+        i2 = knode[k,1]
+        # compute vector length
+        dx1 = xn[i2, 0] - xn[i1, 0]
+        dx2 = xn[i2, 1] - xn[i1, 1]
+        # two cells sharing edge k
+        j1 = kcell[k,0]
+        j2 = kcell[k,1]
+        # compute average flow quantities along edge
+        if (ktype[k] == 0):
+            rho = .5 * (q[0,j1] + q[0,j2])
+            u   = .5 * (q[1,j1] / q[0,j1] + \
+                        q[1,j2] / q[0,j2])
+            v   = .5 * (q[2,j1] / q[0,j1] + \
+                        q[2,j2] / q[0,j2])
+            et  = .5 * (q[3,j1] + q[3,j2])
+            p   = pressure(rho, u, v, et)
+        elif (j1 < 0):
+            rho = .5 * (q_ghost[0,-j1-1] + q[0,j2])
+            u   = .5 * (q_ghost[1,-j1-1] / q_ghost[0,-j1-1] + \
+                        q[1,j2] / q[0,j2])
+            v   = .5 * (q_ghost[2,-j1-1] / q_ghost[0,-j1-1] + \
+                        q[2,j2] / q[0,j2])
+            et  = .5 * (q_ghost[3,-j1-1] + q[3,j2])
+            p   = pressure(rho, u, v, et)
+        elif (j2 < 0):
+            rho = .5 * (q_ghost[0,-j2-1] + q[0,j1])
+            u   = .5 * (q_ghost[1,-j2-1] / q_ghost[0,-j2-1] + \
+                        q[1,j1] / q[0,j1])
+            v   = .5 * (q_ghost[2,-j2-1] / q_ghost[0,-j2-1] + \
+                        q[2,j1] / q[0,j1])
+            et  = .5 * (q_ghost[3,-j2-1] + q[3,j1])
+            p   = pressure(rho, u, v, et)
+        # compute flux vector along edge
+        flux1 = rho*(u*dx2 - v*dx1)
+        flux2 = (rho*u**2 + p)*dx2 - (rho*u*v)*dx1
+        flux3 = (rho*u*v)*dx2 - (rho*v**2 + p)*dx1
+        flux4 = (et+p)*(u*dx2 - v*dx1)
+        # collect flux for left and right cells
+        if (ktype[k] == 0):
+            flux_phys[0,j1] += flux1
+            flux_phys[0,j2] -= flux1
+            flux_phys[1,j1] += flux2
+            flux_phys[1,j2] -= flux2
+            flux_phys[2,j1] += flux3
+            flux_phys[2,j2] -= flux3
+            flux_phys[3,j1] += flux4
+            flux_phys[3,j2] -= flux4
+        elif (j1 < 0):
+            flux_phys[0,j2] -= flux1
+            flux_phys[1,j2] -= flux2
+            flux_phys[2,j2] -= flux3
+            flux_phys[3,j2] -= flux4
+        elif (j2 < 0):
+            flux_phys[0,j1] += flux1
+            flux_phys[1,j1] += flux2
+            flux_phys[2,j1] += flux3
+            flux_phys[3,j1] += flux4
+    return flux_phys
 
 # -----------------------------------------------------------------------------
 # main program
@@ -241,3 +323,6 @@ filename = 'test.dat'
 # plot_mesh()
 
 (q, q_ghost) = ic()
+
+flux_phys = flux()
+print flux_phys
