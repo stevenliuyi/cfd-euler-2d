@@ -91,7 +91,29 @@ def transform():
         kcell[k2, side(edge3, jnode[j,1], xn)] = j
         kcell[k3, side(edge5, jnode[j,0], xn)] = j
 
-    return (xn, itype, jnode, knode, kcell)
+    # other cell data
+    # identify 3 edges forming the cells
+    jedge = np.zeros((nj, 3))
+    for j in range(0,nj):
+        edge1 = [jnode[j,0], jnode[j,1]]
+        edge2 = [jnode[j,1], jnode[j,0]]
+        edge3 = [jnode[j,0], jnode[j,2]]
+        edge4 = [jnode[j,2], jnode[j,0]]
+        edge5 = [jnode[j,1], jnode[j,2]]
+        edge6 = [jnode[j,2], jnode[j,1]]
+        if (edge2 in klist): edge1 = edge2
+        if (edge4 in klist): edge3 = edge4
+        if (edge6 in klist): edge5 = edge6
+
+        k1 = klist.index(edge1)
+        k2 = klist.index(edge3)
+        k3 = klist.index(edge5)
+        
+        jedge[j, 0] = k1
+        jedge[j, 1] = k2
+        jedge[j, 2] = k3
+
+    return (xn, itype, jnode, knode, kcell, jedge)
 
 # -----------------------------------------------------------------------------
 # determine a cell is on the left or right of a edge
@@ -118,7 +140,7 @@ def plot_mesh():
 
 # grid points (structured mesh)
 # mx = 65; my = 17 
-mx = 4; my = 4
+mx = 3; my = 3
 
 # ni - number of points; nj - number of cells; nk - number of edges
 ni = mx * my
@@ -129,5 +151,5 @@ nk = (mx-1) * my + (my-1) * mx + (mx-1) * (my-1)
 filename = 'test.dat'
 (xs, ys) = read_mesh(filename)
 
-(xn, itype, jnode, knode, kcell) = transform()
+(xn, itype, jnode, knode, kcell, jedge) = transform()
 # plot_mesh()
