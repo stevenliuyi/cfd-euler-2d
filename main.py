@@ -174,7 +174,20 @@ def transform():
         jcell[j,1] = kcell[k2,1] if (kcell[k2,0] == j) else kcell[k2,0]
         jcell[j,2] = kcell[k3,1] if (kcell[k3,0] == j) else kcell[k3,0]
 
-    return (xn, itype, jnode, knode, ktype, kcell, jedge, gcell, jcell)
+    # compute cell areas
+    area = np.zeros(nj)
+    for j in range(0, nj):
+        node1 = jnode[j, 0]
+        node2 = jnode[j, 1]
+        node3 = jnode[j, 2]
+        x1 = xn[node1, 0]; y1 = xn[node1, 1]
+        x2 = xn[node2, 0]; y2 = xn[node2, 1]
+        x3 = xn[node3, 0]; y3 = xn[node3, 1]
+
+        area[j] = .5 * abs(x1*y2 + x2*y3 + x3*y1 \
+                         - x2*y1 - x3*y2 - x1*y3)
+
+    return (xn, itype, jnode, knode, ktype, kcell, jedge, gcell, jcell, area)
 
 # -----------------------------------------------------------------------------
 # determine a cell is on the left or right of a edge
@@ -376,12 +389,14 @@ def dissp():
             lam  = abs((u*dx2 - v*dx1) / np.sqrt(dx2**2 + dx1**2)) + c
             eps2 = kappa2 * (dp[j1] + dp[j2]) / 2
             eps4 = max(0., kappa4 - eps2)
-            area = 1.!!
+            dx   = .5 * np.sqrt(area[j1] + area[j2])
 
-            flux1 = (eps2*( q[:,j2] -  q[:,j1]) - \     # incorrect sign in note
-                     eps4*(dq[:,j2] - dq[:,j1])) * lam * area
+            # incorrect sign in note
+            flux1 = (eps2*( q[:,j2] -  q[:,j1]) - \
+                    eps4*(dq[:,j2] - dq[:,j1])) * lam * dx
         else:
-            # boundary edge
+            # boundary edge (no AV along boundaries since
+            # mass should not be introudued from boundaries)
             flux1 = np.zeros(lmax)
 
         # collect flux for left and right cells
@@ -421,7 +436,7 @@ ibcout = 2
 filename = 'test.dat'
 (xs, ys) = read_mesh(filename)
 
-(xn, itype, jnode, knode, ktype, kcell, jedge, gcell, jcell) = transform()
+(xn, itype, jnode, knode, ktype, kcell, jedge, gcell, jcell, area) = transform()
 # plot_mesh()
 
 (q, q_ghost) = ic()
@@ -429,4 +444,3 @@ filename = 'test.dat'
 flux_phys = flux()
 
 flux_av = dissp()
-print flux_av
