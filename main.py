@@ -405,6 +405,30 @@ def dissp():
     return flux_av
 
 # -----------------------------------------------------------------------------
+# evulation of source term
+def source():
+    # defined at cell-centers
+    h = np.zeros((lmax, nj))
+    for j in range(0, nj):
+        # node points forming cell j
+        node1 = jnode[j, 0]
+        node2 = jnode[j, 1]
+        node3 = jnode[j, 2]
+        # compute flow variables
+        yloc  = (xn[node1,1] + xn[node2,1] + xn[node3,1]) / 3.
+        rho   = q[0,j]
+        u     = q[1,j] / q[0,j]
+        v     = q[2,j] / q[0,j]
+        et    = q[3,j]
+        p     = pressure(rho, u, v, et)
+        # compute source
+        h[0,j] = - rho*v / yloc
+        h[1,j] = - rho*u*v / yloc
+        h[2,j] = - rho*v*v / yloc
+        h[3,j] = - (et+p) / yloc
+    return h
+
+# -----------------------------------------------------------------------------
 # main program
 
 # grid points (structured mesh)
@@ -444,3 +468,5 @@ filename = 'test.dat'
 flux_phys = flux()
 
 flux_av = dissp()
+
+h = source()
