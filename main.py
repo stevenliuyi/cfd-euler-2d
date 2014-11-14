@@ -206,6 +206,16 @@ def side(edge, point, xn):
 def pressure(rho, u, v, et):
     return (gamma-1) * (et - .5 * rho * (u**2 + v**2))
 
+
+# -----------------------------------------------------------------------------
+# compute speed of sound
+def sound(p, rho):
+    if (p*rho) <= 0:
+        return np.sqrt(abs(gamma*p/rho))
+        #return cmin
+    else:
+        return np.sqrt(abs(gamma*p/rho))
+
 # -----------------------------------------------------------------------------
 def plot_mesh():
     fig = plt.figure()
@@ -241,7 +251,6 @@ def ic():
     if (ibcin == 2):
         q_ghost[0,:] = 1.
         q_ghost[1,:] = 1.5
-        q_ghost[1,:] = 1.
         q_ghost[2,:] = 0.
         q_ghost[3,:] = 2.
     return q, q_ghost
@@ -385,9 +394,9 @@ def dissp():
             et  = .5 * (q[3,j1] + q[3,j2])
 
             p    = pressure(rho, u, v, et)
-            c    = np.sqrt(gamma * p / rho)
+            c    = sound(p, rho)
             lam  = abs((u*dx2 - v*dx1) / np.sqrt(dx2**2 + dx1**2)) + c
-            eps2 = kappa2 * (dp[j1] + dp[j2]) / 2
+            eps2 = kappa2 * (dp[j1] + dp[j2])
             eps4 = max(0., kappa4 - eps2)
             dx   = .5 * np.sqrt(area[j1] + area[j2])
 
@@ -402,7 +411,7 @@ def dissp():
         # collect flux for left and right cells
         flux_av[:,j1] += flux1
         flux_av[:,j2] -= flux1
-    return flux_av
+    return (flux_av, pr)
 
 # -----------------------------------------------------------------------------
 # evulation of source term
@@ -425,25 +434,238 @@ def source():
         h[0,j] = - rho*v / yloc
         h[1,j] = - rho*u*v / yloc
         h[2,j] = - rho*v*v / yloc
-        h[3,j] = - (et+p) / yloc
+        h[3,j] = - (et+p)*v / yloc
     return h
+
+# -----------------------------------------------------------------------------
+# evulation of residual vectors
+def residual():
+    res = np.zeros((lmax, nj))
+    for j in range(0, nj):
+        # compute residual vector
+        res[:,j] = - (flux_phys[:,j] - flux_av[:,j])/area[j] + h[:,j]
+    return res
+
+# -----------------------------------------------------------------------------
+# compute time step
+# coarse method, need to improve
+def step():
+    dt = np.zeros(nj)
+    for j in range(0, nj):
+        dx  = .5 * np.sqrt(2*area[j])
+        rho = q[0,j]
+        u   = q[1,j] / q[0,j]
+        v   = q[2,j] / q[0,j]
+        et  = q[3,j]
+        p   = pressure(rho, u, v, et)
+        c   = sound(p, rho)
+
+        dt[j] = cfl / ((abs(u) + abs(v))/dx + c*np.sqrt(2/dx**2))
+    return dt
+
+# -----------------------------------------------------------------------------
+# update q in ghost cells along solid boundary
+def bc_wall():
+    global q_ghost
+    for g in range(0,ng):
+        # boundary edge
+        k = gcell[g]
+        # normal cell sharing edge k with the ghost cell
+        j = max(kcell[k,0], kcell[k,1])
+
+        if (ktype[k] == 1):
+            # node points forming edge k
+            i1 = knode[k,0]
+            i2 = knode[k,1]
+            # compute vector length
+            dx1 = xn[i2, 0] - xn[i1, 0]
+            dx2 = xn[i2, 1] - xn[i1, 1]
+            dx  = np.sqrt(dx1**2 + dx2**2)
+
+            u         = q[1,j] / q[0,j]
+            v         = q[2,j] / q[0,j]
+            vn        = (u*dx2 - v*dx1) / dx
+            u_ghost   = u - 2 * vn * dx2 / dx
+            v_ghost   = v + 2 * vn * dx1 / dx
+            rho_ghost = q[0,j]
+            p_ghost   = pr[j]
+            et_ghost  = p_ghost/(gamma-1) + .5*rho_ghost* \
+                        (u_ghost**2 + v_ghost**2)
+
+            q_ghost[0,g] = rho_ghost
+            q_ghost[1,g] = rho_ghost * u_ghost
+            q_ghost[2,g] = rho_ghost * v_ghost
+            q_ghost[3,g] = et_ghost
+    return
+
+# -----------------------------------------------------------------------------
+# update q in ghost cells along symmetric boundary
+def bc_symmetric():
+    global q_ghost
+
+    for g in range(0,ng):
+        # boundary edge
+        k = gcell[g]
+        # normal cell sharing edge k with the ghost cell
+        j = max(kcell[k,0], kcell[k,1])
+
+        if (ktype[k] == 2):
+            q_ghost[0,g] =   q[0,j]
+            q_ghost[1,g] =   q[1,j]
+            q_ghost[2,g] =  -q[2,j]
+            q_ghost[3,g] =   q[3,j]
+    return
+
+# -----------------------------------------------------------------------------
+# update q in ghost cells along inlet boundary
+def bc_inflow():
+    global q_ghost
+
+    for g in range(0,ng):
+        # boundary edge
+        k = gcell[g]
+        # normal cell sharing edge k with the ghost cell
+        j = max(kcell[k,0], kcell[k,1])
+
+        # supersonic inflow (ibcin = 2)
+        if (ibcin == 2):
+            m = 1.5
+            if (ktype[k] == 3):
+                term = 1 / (1 + .5*(gamma-1) * m**2)
+                p    = term**(gamma/(gamma-1))
+                rho  = p/term
+                c    = sound(p, rho)
+                u    = m * c
+                v    = 0.
+                et   = p/(gamma-1) + .5*rho*(u**2 + v**2)
+
+                q_ghost[0,g] = rho
+                q_ghost[1,g] = rho*u
+                q_ghost[2,g] = rho*v
+                q_ghost[3,g] = et
+    return
+
+# -----------------------------------------------------------------------------
+# update q in ghost cells along outlet boundary
+def bc_outflow():
+    global q_ghost
+
+    for g in range(0,ng):
+        # boundary edge
+        k = gcell[g]
+        # normal cell sharing edge k with the ghost cell
+        j = max(kcell[k,0], kcell[k,1])
+
+        # supersonic inflow (ibcin = 2)
+        if (ibcout == 2):
+            if (ktype[k] == 4):
+                q_ghost[:,g] = q[:,j]
+    return
+# -----------------------------------------------------------------------------
+def calc_mach():
+    global line1, line2
+    sym_mach = []
+    sol_mach = []
+    sym_x    = []
+    sol_x    = []
+    for g in range(0,ng):
+        # boundary edge
+        k = gcell[g]
+        # normal cell sharing edge k with the ghost cell
+        j = max(kcell[k,0], kcell[k,1])
+        
+        if (ktype[k] == 1):
+            rho = q[0,j]
+            u   = q[1,j] / q[0,j]
+            v   = q[2,j] / q[0,j]
+            et  = q[3,j]
+            p   = pressure(rho, u, v, et)
+            c   = sound(p, rho)
+            sol_mach.append(u/c)
+
+            node1 = jnode[j, 0]
+            node2 = jnode[j, 1]
+            node3 = jnode[j, 2]
+            xloc  = (xn[node1,0] + xn[node2,0] + xn[node3,0]) / 3.
+            sol_x.append(xloc)
+
+        if (ktype[k] == 2):
+            rho = q[0,j]
+            u   = q[1,j] / q[0,j]
+            v   = q[2,j] / q[0,j]
+            et  = q[3,j]
+            p   = pressure(rho, u, v, et)
+            c   = sound(p, rho)
+            sym_mach.append(u/c)
+        
+            node1 = jnode[j, 0]
+            node2 = jnode[j, 1]
+            node3 = jnode[j, 2]
+            xloc  = (xn[node1,0] + xn[node2,0] + xn[node3,0]) / 3.
+            sym_x.append(xloc)
+    if (t == 0):
+        line1, = plt.plot(sym_x, sym_mach, 'o-')
+        line2, = plt.plot(sol_x, sol_mach, 'o-')
+        ax.set_ylim(1,3)
+        fig.show()
+    else:
+        line1.set_ydata(sym_mach)
+        line2.set_ydata(sol_mach)
+        fig.canvas.draw()
+
+    return
+
+# -----------------------------------------------------------------------------
+# four-stage Runge-Kutta scheme
+def rk4():
+    global q, q_ghost, flux_phys, flux_av, pr, h, res
+
+    rk    = [1./4, 1./3, 1./2, 1.]
+    q_old = np.copy(q)
+
+    for m in range(0, 4):
+        # compute flux
+        flux_phys = flux()
+        # compute aritificial viscosity flux
+        (flux_av, pr) = dissp()
+        # compute source
+        h = source()
+        # compute residual
+        res = residual()
+        # compute time step
+        #dt = step()
+        dt = np.ones(nj)*.005
+
+        # update solution
+        for j in range(0, nj):
+            q[:,j] = q_old[:,j] + rk[m]*dt[j]*res[:,j]
+
+        # boundary conditions
+        bc_wall()
+        bc_symmetric()
+        bc_inflow()
+        bc_outflow()
+
+    calc_mach()
+    return
 
 # -----------------------------------------------------------------------------
 # main program
 
 # grid points (structured mesh)
-# mx = 65; my = 17 
-mx = 3; my = 3
+mx = 65; my = 17 
+# mx = 3; my = 3
 
 # parameters
 lmax = 4
 gamma = 1.4
 alpha = 1       # axisymmetric flow
 
-cfl  = 1.5
-visc = 5
-eps  = 1e-8
-tmax = 10000
+cfl  = .1
+visc = 4
+eps  = 1e-5
+cmin = 1e-2
+tmax = 100000
 
 # ni - number of points; nj - number of cells;
 # nk - number of edges;  np - number of ghost cells
@@ -457,7 +679,7 @@ ibcin  = 2
 ibcout = 2
 
 # coordinates of structured mesh
-filename = 'test.dat'
+filename = 'ft03.dat'
 (xs, ys) = read_mesh(filename)
 
 (xn, itype, jnode, knode, ktype, kcell, jedge, gcell, jcell, area) = transform()
@@ -465,8 +687,11 @@ filename = 'test.dat'
 
 (q, q_ghost) = ic()
 
-flux_phys = flux()
+fig = plt.figure()
+ax  = fig.add_subplot(111, aspect='equal')
 
-flux_av = dissp()
-
-h = source()
+for t in range(0,tmax):
+    stop = False
+    rk4()
+    print 'step ' + str(t), np.amax(abs(res[0,:]))
+    if (stop): break
